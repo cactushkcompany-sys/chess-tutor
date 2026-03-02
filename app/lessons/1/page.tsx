@@ -81,12 +81,9 @@ export default function Lesson1() {
             animate={{ opacity: 1, x: 0 }}
             className="bg-white rounded-2xl shadow-xl p-6"
           >
-            <Chessboard
-              id="lesson1"
-              boardWidth={Math.min(500, typeof window !== 'undefined' ? window.innerWidth - 100 : 500)}
-              position="start"
-              arePiecesDraggable={false}
-            />
+            <div className="w-full max-w-[500px] mx-auto">
+              <Chessboard />
+            </div>
           </motion.div>
 
           {/* 右侧：说明 */}
