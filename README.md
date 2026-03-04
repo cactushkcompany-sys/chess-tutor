@@ -14,19 +14,19 @@
 
 ## 🚀 在线体验
 
-**方式一：一键部署到 Vercel（推荐）**
+**一键部署：**
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/cactushkcompany-sys/chess-tutor)
+[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/cactushkcompany-sys/chess-tutor)
 
-点击上面的按钮，Vercel 会自动：
+点击上面的按钮，会自动：
 1. Fork 这个仓库到你的 GitHub
-2. 创建 Vercel 项目
-3. 自动部署
-4. 生成在线访问地址
+2. 创建项目并自动部署
+3. 生成在线访问地址
 
-**方式二：手动部署**
+**手动部署：**
 
-1. 访问 [Vercel](https://vercel.com/new)
+1. 访问 [Vercel](https://vercel.com/new) 或 [Netlify](https://app.netlify.com/start)
 2. 导入这个 GitHub 仓库
 3. 点击 Deploy
 4. 等待 2-3 分钟即可
