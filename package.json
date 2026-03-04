@@ -4,16 +4,19 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:mobile": "next dev -H 0.0.0.0",
+    "test:mobile": "./test-mobile.sh",
     "build": "next build",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
-    "chess.js": "^1.4.0",
+    "chess.js": "^0.13.4",
+    "fireworks-js": "^2.10.8",
     "framer-motion": "^12.34.4",
     "next": "16.1.6",
     "react": "19.2.3",
-    "react-chessboard": "^5.10.0",
+    "react-chessboard": "^4.6.0",
     "react-dom": "19.2.3"
   },
   "devDependencies": {

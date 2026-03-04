@@ -1,0 +1,1058 @@
+'use client';
+
+import { useState, useEffect } from 'react';
+import { Chess } from 'chess.js';
+import { Chessboard } from 'react-chessboard';
+import { motion, AnimatePresence } from 'framer-motion';
+import Link from 'next/link';
+
+type CelebrationEffect = 'move' | 'capture' | 'check' | 'checkmate' | null;
+
+export default function PlayPage() {
+  const [game, setGame] = useState(new Chess());
+  const [celebration, setCelebration] = useState<CelebrationEffect>(null);
+  const [errorMessage, setErrorMessage] = useState<string>('');
+  const [isPlayerTurn, setIsPlayerTurn] = useState(true);
+  const [captureSquare, setCaptureSquare] = useState<string | null>(null);
+
+  // 播放音效 - 确保音量足够大
+  const playSound = (type: 'move' | 'capture' | 'check' | 'win') => {
+    try {
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      
+      // 恢复 AudioContext（浏览器安全策略要求）
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+      
+      if (type === 'move') {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.frequency.value = 300;
+        gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.15);
+      } else if (type === 'capture') {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.frequency.setValueAtTime(400, audioContext.currentTime);
+        oscillator.frequency.exponentialRampToValueAtTime(900, audioContext.currentTime + 0.25);
+        gainNode.gain.setValueAtTime(0.6, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.25);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.25);
+      } else if (type === 'check') {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.frequency.value = 700;
+        gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+        gainNode.gain.setValueAtTime(0, audioContext.currentTime + 0.06);
+        gainNode.gain.setValueAtTime(0.5, audioContext.currentTime + 0.12);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.35);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.35);
+      } else if (type === 'win') {
+        const notes = [523, 659, 784, 1047];
+        notes.forEach((freq, i) => {
+          const oscillator = audioContext.createOscillator();
+          const gainNode = audioContext.createGain();
+          oscillator.connect(gainNode);
+          gainNode.connect(audioContext.destination);
+          oscillator.frequency.value = freq;
+          const startTime = audioContext.currentTime + i * 0.18;
+          gainNode.gain.setValueAtTime(0.4, startTime);
+          gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + 0.4);
+          oscillator.start(startTime);
+          oscillator.stop(startTime + 0.4);
+        });
+        
+        // 播放语音："你胜利啦！"
+        setTimeout(() => {
+          const utterance = new SpeechSynthesisUtterance('你胜利啦！');
+          utterance.lang = 'zh-CN';
+          utterance.rate = 0.9;
+          utterance.pitch = 1.3; // 提高音调，更像女生
+          utterance.volume = 1;
+          window.speechSynthesis.speak(utterance);
+        }, 500);
+      }
+    } catch (e) {
+      console.error('音效播放失败:', e);
+    }
+  };
+
+  // AI 走棋（绝对不吃子）
+  const makeAIMove = () => {
+    const possibleMoves = game.moves({ verbose: true });
+    
+    if (possibleMoves.length === 0) {
+      setIsPlayerTurn(true);
+      return;
+    }
+
+    // **严格过滤：绝对不吃子**
+    const nonCaptureMoves = possibleMoves.filter((move: any) => !move.captured);
+    
+    // 如果没有非吃子走法，就随机走（极少情况）
+    const movesToConsider = nonCaptureMoves.length > 0 ? nonCaptureMoves : possibleMoves;
+    
+    const randomMove = movesToConsider[Math.floor(Math.random() * movesToConsider.length)];
+    
+    game.move(randomMove);
+    setGame(new Chess(game.fen()));
+    setIsPlayerTurn(true);
+    playSound('move');
+  };
+
+  // 玩家走棋
+  function onDrop(sourceSquare: string, targetSquare: string, draggedPiece: string): boolean {
+    // 检查是否轮到玩家
+    if (!isPlayerTurn) {
+      setErrorMessage('等等，还没轮到你呢！');
+      setTimeout(() => setErrorMessage(''), 2000);
+      return false;
+    }
+
+    // 只允许白方（玩家）移动
+    const piece = game.get(sourceSquare);
+    if (!piece || piece.color !== 'w') {
+      setErrorMessage('只能移动白色棋子哦！');
+      setTimeout(() => setErrorMessage(''), 2000);
+      return false;
+    }
+
+    try {
+      const move = game.move({
+        from: sourceSquare,
+        to: targetSquare,
+        promotion: 'q',
+      });
+
+      if (!move) {
+        setErrorMessage('这样走不符合规则哦，试试其他走法！');
+        setTimeout(() => setErrorMessage(''), 2000);
+        return false;
+      }
+
+      setGame(new Chess(game.fen()));
+      setIsPlayerTurn(false);
+
+      // 判断走棋类型并触发庆祝效果
+      if (game.in_checkmate()) {
+        setCelebration('checkmate');
+        playSound('win');
+        setTimeout(() => setCelebration(null), 4000);
+      } else if (game.in_check()) {
+        setCelebration('check');
+        playSound('check');
+        setTimeout(() => setCelebration(null), 1800);
+      } else if (move.captured) {
+        setCaptureSquare(targetSquare); // 记录吃子位置
+        setCelebration('capture');
+        playSound('capture');
+        setTimeout(() => {
+          setCelebration(null);
+          setCaptureSquare(null);
+        }, 2000); // 延长显示时间
+      } else {
+        setCelebration('move');
+        playSound('move');
+        setTimeout(() => setCelebration(null), 600);
+      }
+
+      // AI 延迟回应
+      if (!game.game_over()) {
+        setTimeout(() => makeAIMove(), 800);
+      }
+
+      return true;
+    } catch (error) {
+      console.error('移动错误:', error);
+      setErrorMessage('这样走不符合规则哦，试试其他走法！');
+      setTimeout(() => setErrorMessage(''), 2000);
+      return false;
+    }
+  }
+
+  // 重新开始
+  const resetGame = () => {
+    setGame(new Chess());
+    setCelebration(null);
+    setErrorMessage('');
+    setIsPlayerTurn(true);
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 to-slate-200 p-4 md:p-8">
+      <div className="max-w-4xl mx-auto">
+        {/* 顶部栏 */}
+        <div className="mb-6 flex justify-between items-center">
+          <Link href="/" className="text-gray-600 hover:text-gray-800 font-medium">
+            ← 返回
+          </Link>
+          <button
+            onClick={resetGame}
+            className="bg-white hover:bg-gray-50 text-gray-700 font-medium py-2 px-4 rounded-lg shadow transition-colors"
+          >
+            重新开始
+          </button>
+        </div>
+
+        {/* 主游戏区 */}
+        <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8">
+          <div className="max-w-[600px] mx-auto">
+            {/* 对手信息 */}
+            <div className="mb-4 flex items-center justify-between bg-slate-50 rounded-lg p-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center text-white text-xl">
+                  🤖
+                </div>
+                <div>
+                  <div className="font-semibold text-gray-800">友好机器人</div>
+                  <div className="text-xs text-gray-500">只防守，不吃子</div>
+                </div>
+              </div>
+            </div>
+
+            {/* 错误提示 */}
+            <AnimatePresence>
+              {errorMessage && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  className="mb-4 bg-red-100 border-2 border-red-300 text-red-700 px-4 py-3 rounded-lg text-center font-medium shadow-md"
+                >
+                  {errorMessage}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* 棋盘 */}
+            <div className="relative w-full aspect-square max-w-[600px] mx-auto">
+              <Chessboard
+                position={game.fen()}
+                onPieceDrop={onDrop}
+                boardWidth={600}
+                lightSquareStyle={{ backgroundColor: '#edeed1' }}
+                darkSquareStyle={{ backgroundColor: '#779952' }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* 全局特效层 - 覆盖整个屏幕 */}
+      <AnimatePresence>
+        {celebration === 'move' && (
+          <motion.div
+            initial={{ opacity: 0.6 }}
+            animate={{ opacity: 0 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            className="fixed inset-0 pointer-events-none bg-emerald-200/20 z-50"
+          />
+        )}
+
+        {celebration === 'capture' && captureSquare && (
+          <>
+            {/* 获取被吃子格子的绝对位置 */}
+            {(() => {
+              const squareElement = document.querySelector(`[data-square="${captureSquare}"]`);
+              if (!squareElement) return null;
+              const rect = squareElement.getBoundingClientRect();
+              
+              const left = rect.left + rect.width / 2;
+              const top = rect.top + rect.height / 2;
+              
+              return (
+                <>
+                  {/* 闪光冲击波 */}
+                  <motion.div
+                    initial={{ opacity: 1, scale: 0 }}
+                    animate={{ opacity: 0, scale: 8 }}
+                    transition={{ duration: 0.6, ease: 'easeOut' }}
+                    className="fixed pointer-events-none z-50"
+                    style={{
+                      left: `${left}px`,
+                      top: `${top}px`,
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  >
+                    <div className="w-32 h-32 rounded-full bg-gradient-radial from-yellow-300 via-orange-400 to-transparent" />
+                  </motion.div>
+
+                  {/* 超大爆炸表情 */}
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.2, rotate: -180 }}
+                    animate={{ 
+                      opacity: [0, 1, 1, 0],
+                      scale: [0.2, 1.8, 1.6, 2.2],
+                      rotate: [0, 10, -10, 0]
+                    }}
+                    transition={{ duration: 1.5, times: [0, 0.3, 0.7, 1] }}
+                    className="fixed pointer-events-none z-50"
+                    style={{
+                      left: `${left}px`,
+                      top: `${top}px`,
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  >
+                    <div className="text-[150px] drop-shadow-2xl">💥</div>
+                  </motion.div>
+
+                  {/* 旋转的庆祝表情 */}
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.3 }}
+                    animate={{ 
+                      opacity: [0, 1, 1, 0],
+                      scale: [0.3, 1.5, 1.4, 1.8],
+                      rotate: 360
+                    }}
+                    transition={{ duration: 1.8 }}
+                    className="fixed pointer-events-none z-50"
+                    style={{
+                      left: `${left}px`,
+                      top: `${top}px`,
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  >
+                    <div className="text-[130px] drop-shadow-2xl">🎉</div>
+                  </motion.div>
+                  
+                  {/* 火花粒子爆炸 */}
+                  <div className="fixed inset-0 pointer-events-none z-50">
+                    {[...Array(40)].map((_, i) => {
+                      const angle = (i * Math.PI * 2) / 40;
+                      const distance = 150 + Math.random() * 50;
+                      return (
+                        <motion.div
+                          key={`spark-${i}`}
+                          initial={{ 
+                            opacity: 1, 
+                            scale: 1.5,
+                            left: `${left}px`, 
+                            top: `${top}px` 
+                          }}
+                          animate={{
+                            opacity: 0,
+                            scale: 0.3,
+                            left: `${left + Math.cos(angle) * distance}px`,
+                            top: `${top + Math.sin(angle) * distance}px`,
+                          }}
+                          transition={{ 
+                            duration: 1 + Math.random() * 0.5, 
+                            ease: 'easeOut',
+                            delay: i * 0.01
+                          }}
+                          className="fixed text-4xl"
+                          style={{
+                            color: ['#ffff00', '#ff6b00', '#ff0000', '#ff00ff'][i % 4],
+                            transform: 'translate(-50%, -50%)',
+                            filter: 'brightness(1.5)',
+                          }}
+                        >
+                          ✨
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+
+                  {/* 彩色星星螺旋 */}
+                  <div className="fixed inset-0 pointer-events-none z-50">
+                    {[...Array(30)].map((_, i) => {
+                      const angle = (i * Math.PI * 2) / 30;
+                      const spiralFactor = i * 5;
+                      return (
+                        <motion.div
+                          key={`star-spiral-${i}`}
+                          initial={{ 
+                            opacity: 1, 
+                            scale: 1.8,
+                            left: `${left}px`, 
+                            top: `${top}px`,
+                            rotate: 0
+                          }}
+                          animate={{
+                            opacity: 0,
+                            scale: 0.5,
+                            left: `${left + Math.cos(angle + spiralFactor * 0.05) * (80 + spiralFactor)}px`,
+                            top: `${top + Math.sin(angle + spiralFactor * 0.05) * (80 + spiralFactor)}px`,
+                            rotate: 720
+                          }}
+                          transition={{ 
+                            duration: 1.5, 
+                            ease: 'easeOut',
+                            delay: i * 0.02
+                          }}
+                          className="fixed text-5xl"
+                          style={{
+                            color: ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf', '#ff8c94', '#95e1d3'][i % 6],
+                            transform: 'translate(-50%, -50%)',
+                            filter: 'drop-shadow(0 0 8px currentColor)',
+                          }}
+                        >
+                          ⭐
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                  
+                  {/* 超级撒花喷泉 */}
+                  <div className="fixed inset-0 pointer-events-none z-50">
+                    {[...Array(50)].map((_, i) => {
+                      const xOffset = (Math.random() - 0.5) * 40;
+                      const yDistance = -200 - Math.random() * 150;
+                      const xDistance = (Math.random() - 0.5) * 300;
+                      return (
+                        <motion.div
+                          key={`fountain-${i}`}
+                          initial={{ 
+                            opacity: 1, 
+                            left: `${left + xOffset}px`, 
+                            top: `${top}px`,
+                            rotate: 0,
+                            scale: 1.8
+                          }}
+                          animate={{
+                            opacity: 0,
+                            top: `${top + yDistance}px`,
+                            left: `${left + xDistance}px`,
+                            rotate: Math.random() * 1440 - 720,
+                            scale: 0.6
+                          }}
+                          transition={{ 
+                            duration: 1.8 + Math.random() * 0.6, 
+                            delay: i * 0.015,
+                            ease: [0.25, 0.1, 0.25, 1]
+                          }}
+                          className="fixed text-5xl"
+                          style={{
+                            transform: 'translate(-50%, -50%)',
+                            filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.8))',
+                          }}
+                        >
+                          {['🎊', '🎉', '✨', '🌟', '💫', '⭐', '🎈', '🎁'][i % 8]}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                </>
+              );
+            })()}
+          </>
+        )}
+
+        {celebration === 'check' && (
+          <>
+            {/* 将军 - 简洁的闪电警告 */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.5 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 flex items-center justify-center pointer-events-none z-50"
+            >
+              <motion.div
+                animate={{ 
+                  scale: [1, 1.2, 1, 1.2, 1],
+                  rotate: [0, -5, 5, -5, 0]
+                }}
+                transition={{ duration: 0.8 }}
+                className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white text-6xl font-bold px-12 py-8 rounded-2xl shadow-2xl border-4 border-yellow-300"
+              >
+                ⚡ 将军！⚡
+              </motion.div>
+            </motion.div>
+            
+            {/* 闪电效果 */}
+            <div className="fixed inset-0 pointer-events-none z-50">
+              {[...Array(12)].map((_, i) => {
+                const angle = (i * Math.PI * 2) / 12;
+                const distance = 200;
+                return (
+                  <motion.div
+                    key={`lightning-${i}`}
+                    initial={{ opacity: 0, scale: 0 }}
+                    animate={{
+                      opacity: [0, 1, 0],
+                      scale: [0, 2.5, 0],
+                    }}
+                    transition={{ duration: 0.6, delay: i * 0.05 }}
+                    className="fixed text-8xl"
+                    style={{
+                      left: `calc(50% + ${Math.cos(angle) * distance}px)`,
+                      top: `calc(50% + ${Math.sin(angle) * distance}px)`,
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  >
+                    ⚡
+                  </motion.div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {celebration === 'checkmate' && (
+          <>
+            {/* 胜利 - 全屏遮罩 */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="fixed inset-0 bg-gradient-to-br from-purple-900/80 via-pink-900/80 to-orange-900/80 z-50 pointer-events-none"
+            />
+            
+            {/* 胜利文字 - 居中突出 */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0, y: -50 }}
+              animate={{ 
+                opacity: 1, 
+                scale: 1,
+                y: 0
+              }}
+              transition={{ 
+                type: 'spring',
+                stiffness: 200,
+                damping: 15,
+                delay: 0.2
+              }}
+              className="fixed inset-0 flex items-center justify-center pointer-events-none z-50"
+            >
+              <motion.div
+                animate={{ 
+                  rotate: [0, 3, -3, 0],
+                  scale: [1, 1.05, 1]
+                }}
+                transition={{ repeat: Infinity, duration: 1.5 }}
+                className="bg-gradient-to-r from-yellow-300 via-orange-400 to-pink-400 text-white text-8xl font-black px-20 py-12 rounded-3xl shadow-2xl border-8 border-yellow-200"
+                style={{
+                  textShadow: '4px 4px 8px rgba(0,0,0,0.5)',
+                }}
+              >
+                🏆 你胜利啦！🏆
+              </motion.div>
+            </motion.div>
+            
+            {/* 全屏烟花 */}
+            <div className="fixed inset-0 pointer-events-none overflow-hidden z-50">
+              {[...Array(80)].map((_, i) => {
+                const startX = i % 4 === 0 ? 0 : i % 4 === 1 ? window.innerWidth : Math.random() * window.innerWidth;
+                const startY = i % 4 === 2 ? 0 : i % 4 === 3 ? window.innerHeight : Math.random() * window.innerHeight;
+                return (
+                  <motion.div
+                    key={`firework-${i}`}
+                    initial={{ 
+                      opacity: 1, 
+                      scale: 0.5,
+                      left: `${startX}px`, 
+                      top: `${startY}px` 
+                    }}
+                    animate={{
+                      opacity: 0,
+                      scale: 2.5,
+                      left: `${window.innerWidth / 2 + (Math.random() - 0.5) * window.innerWidth}px`,
+                      top: `${window.innerHeight / 2 + (Math.random() - 0.5) * window.innerHeight}px`,
+                      rotate: Math.random() * 720
+                    }}
+                    transition={{ 
+                      duration: 2 + Math.random() * 1, 
+                      delay: i * 0.03,
+                      ease: 'easeOut'
+                    }}
+                    className="fixed text-7xl"
+                    style={{
+                      transform: 'translate(-50%, -50%)',
+                    }}
+                  >
+                    {['🎆', '🎇', '✨', '🌟', '💫', '⭐'][i % 6]}
+                  </motion.div>
+                );
+              })}
+            </div>
+            
+            {/* 彩色光环脉冲 */}
+            <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
+              {[...Array(8)].map((_, i) => (
+                <motion.div
+                  key={`victory-ring-${i}`}
+                  initial={{ opacity: 0.8, scale: 0 }}
+                  animate={{
+                    opacity: 0,
+                    scale: 8 + i * 0.5,
+                  }}
+                  transition={{ 
+                    duration: 2, 
+                    delay: i * 0.2,
+                    ease: 'easeOut',
+                    repeat: Infinity,
+                    repeatDelay: 1
+                  }}
+                  className="absolute w-96 h-96 rounded-full border-[12px]"
+                  style={{
+                    borderColor: ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf', '#ff8c94', '#95e1d3', '#ffd93d', '#6bcf7f'][i],
+                    boxShadow: `0 0 30px ${['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf'][i % 4]}`,
+                  }}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </AnimatePresence>
+                {celebration === 'move' && (
+                  <motion.div
+                    initial={{ opacity: 0.6, scale: 1.05 }}
+                    animate={{ opacity: 0, scale: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.4 }}
+                    className="absolute inset-0 pointer-events-none bg-emerald-200/40 rounded-lg"
+                  />
+                )}
+
+                {celebration === 'capture' && captureSquare && (
+                  <>
+                    {/* 获取被吃子格子的位置 */}
+                    {(() => {
+                      const squareElement = document.querySelector(`[data-square="${captureSquare}"]`);
+                      if (!squareElement) return null;
+                      const rect = squareElement.getBoundingClientRect();
+                      const boardElement = document.querySelector('[data-square]')?.parentElement?.parentElement;
+                      const boardRect = boardElement?.getBoundingClientRect();
+                      if (!boardRect) return null;
+                      
+                      const left = ((rect.left - boardRect.left) / boardRect.width) * 100;
+                      const top = ((rect.top - boardRect.top) / boardRect.height) * 100;
+                      
+                      return (
+                        <>
+                          {/* 闪光冲击波 */}
+                          <motion.div
+                            initial={{ opacity: 1, scale: 0 }}
+                            animate={{ opacity: 0, scale: 8 }}
+                            transition={{ duration: 0.6, ease: 'easeOut' }}
+                            className="absolute pointer-events-none z-30"
+                            style={{
+                              left: `${left}%`,
+                              top: `${top}%`,
+                              transform: 'translate(-50%, -50%)',
+                            }}
+                          >
+                            <div className="w-32 h-32 rounded-full bg-gradient-radial from-yellow-300 via-orange-400 to-transparent" />
+                          </motion.div>
+
+                          {/* 超大爆炸表情 */}
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.2, rotate: -180 }}
+                            animate={{ 
+                              opacity: [0, 1, 1, 0],
+                              scale: [0.2, 1.8, 1.6, 2.2],
+                              rotate: [0, 10, -10, 0]
+                            }}
+                            transition={{ duration: 1.5, times: [0, 0.3, 0.7, 1] }}
+                            className="absolute pointer-events-none z-25"
+                            style={{
+                              left: `${left}%`,
+                              top: `${top}%`,
+                              transform: 'translate(-50%, -50%)',
+                            }}
+                          >
+                            <div className="text-[150px] drop-shadow-2xl">💥</div>
+                          </motion.div>
+
+                          {/* 旋转的庆祝表情 */}
+                          <motion.div
+                            initial={{ opacity: 0, scale: 0.3 }}
+                            animate={{ 
+                              opacity: [0, 1, 1, 0],
+                              scale: [0.3, 1.5, 1.4, 1.8],
+                              rotate: 360
+                            }}
+                            transition={{ duration: 1.8 }}
+                            className="absolute pointer-events-none z-24"
+                            style={{
+                              left: `${left}%`,
+                              top: `${top}%`,
+                              transform: 'translate(-50%, -50%)',
+                            }}
+                          >
+                            <div className="text-[130px] drop-shadow-2xl">🎉</div>
+                          </motion.div>
+                          
+                          {/* 火花粒子爆炸 - 第一波 */}
+                          <div className="absolute inset-0 pointer-events-none z-22">
+                            {[...Array(40)].map((_, i) => {
+                              const angle = (i * Math.PI * 2) / 40;
+                              const distance = 50 + Math.random() * 20;
+                              return (
+                                <motion.div
+                                  key={`spark-${i}`}
+                                  initial={{ 
+                                    opacity: 1, 
+                                    scale: 1.5,
+                                    left: `${left}%`, 
+                                    top: `${top}%` 
+                                  }}
+                                  animate={{
+                                    opacity: 0,
+                                    scale: 0.3,
+                                    left: `${left + Math.cos(angle) * distance}%`,
+                                    top: `${top + Math.sin(angle) * distance}%`,
+                                  }}
+                                  transition={{ 
+                                    duration: 1 + Math.random() * 0.5, 
+                                    ease: 'easeOut',
+                                    delay: i * 0.01
+                                  }}
+                                  className="absolute text-4xl"
+                                  style={{
+                                    color: ['#ffff00', '#ff6b00', '#ff0000', '#ff00ff'][i % 4],
+                                    transform: 'translate(-50%, -50%)',
+                                    filter: 'brightness(1.5)',
+                                  }}
+                                >
+                                  ✨
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+
+                          {/* 彩色星星螺旋 */}
+                          <div className="absolute inset-0 pointer-events-none z-21">
+                            {[...Array(30)].map((_, i) => {
+                              const angle = (i * Math.PI * 2) / 30;
+                              const spiralFactor = i * 2;
+                              return (
+                                <motion.div
+                                  key={`star-spiral-${i}`}
+                                  initial={{ 
+                                    opacity: 1, 
+                                    scale: 1.8,
+                                    left: `${left}%`, 
+                                    top: `${top}%`,
+                                    rotate: 0
+                                  }}
+                                  animate={{
+                                    opacity: 0,
+                                    scale: 0.5,
+                                    left: `${left + Math.cos(angle + spiralFactor * 0.1) * (30 + spiralFactor)}%`,
+                                    top: `${top + Math.sin(angle + spiralFactor * 0.1) * (30 + spiralFactor)}%`,
+                                    rotate: 720
+                                  }}
+                                  transition={{ 
+                                    duration: 1.5, 
+                                    ease: 'easeOut',
+                                    delay: i * 0.02
+                                  }}
+                                  className="absolute text-5xl"
+                                  style={{
+                                    color: ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf', '#ff8c94', '#95e1d3'][i % 6],
+                                    transform: 'translate(-50%, -50%)',
+                                    filter: 'drop-shadow(0 0 8px currentColor)',
+                                  }}
+                                >
+                                  ⭐
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                          
+                          {/* 超级撒花喷泉 */}
+                          <div className="absolute inset-0 pointer-events-none z-20">
+                            {[...Array(50)].map((_, i) => {
+                              const xOffset = (Math.random() - 0.5) * 15;
+                              const yDistance = -60 - Math.random() * 40;
+                              const xDistance = (Math.random() - 0.5) * 80;
+                              return (
+                                <motion.div
+                                  key={`fountain-${i}`}
+                                  initial={{ 
+                                    opacity: 1, 
+                                    left: `${left + xOffset}%`, 
+                                    top: `${top}%`,
+                                    rotate: 0,
+                                    scale: 1.8
+                                  }}
+                                  animate={{
+                                    opacity: 0,
+                                    top: `${top + yDistance}%`,
+                                    left: `${left + xDistance}%`,
+                                    rotate: Math.random() * 1440 - 720,
+                                    scale: 0.6
+                                  }}
+                                  transition={{ 
+                                    duration: 1.8 + Math.random() * 0.6, 
+                                    delay: i * 0.015,
+                                    ease: [0.25, 0.1, 0.25, 1]
+                                  }}
+                                  className="absolute text-5xl"
+                                  style={{
+                                    transform: 'translate(-50%, -50%)',
+                                    filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.8))',
+                                  }}
+                                >
+                                  {['🎊', '🎉', '✨', '🌟', '💫', '⭐', '🎈', '🎁'][i % 8]}
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                          
+                          {/* 脉冲光环 */}
+                          <div className="absolute inset-0 pointer-events-none z-19">
+                            {[...Array(6)].map((_, i) => (
+                              <motion.div
+                                key={`pulse-${i}`}
+                                initial={{ 
+                                  opacity: 0.9, 
+                                  scale: 0,
+                                  left: `${left}%`,
+                                  top: `${top}%`,
+                                }}
+                                animate={{
+                                  opacity: 0,
+                                  scale: 4 + i * 0.8,
+                                }}
+                                transition={{ 
+                                  duration: 1.5, 
+                                  delay: i * 0.12,
+                                  ease: 'easeOut'
+                                }}
+                                className="absolute w-48 h-48 rounded-full border-[10px]"
+                                style={{
+                                  borderColor: ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf', '#ff8c94', '#95e1d3'][i],
+                                  transform: 'translate(-50%, -50%)',
+                                  boxShadow: `0 0 20px ${['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf', '#ff8c94', '#95e1d3'][i]}`,
+                                }}
+                              />
+                            ))}
+                          </div>
+
+                          {/* 闪烁的小星星背景 */}
+                          <div className="absolute inset-0 pointer-events-none z-18">
+                            {[...Array(20)].map((_, i) => {
+                              const randomX = left + (Math.random() - 0.5) * 60;
+                              const randomY = top + (Math.random() - 0.5) * 60;
+                              return (
+                                <motion.div
+                                  key={`twinkle-${i}`}
+                                  initial={{ opacity: 0, scale: 0 }}
+                                  animate={{ 
+                                    opacity: [0, 1, 0],
+                                    scale: [0, 1.5, 0]
+                                  }}
+                                  transition={{ 
+                                    duration: 1.2,
+                                    delay: 0.3 + i * 0.05,
+                                    repeat: 1
+                                  }}
+                                  className="absolute text-3xl"
+                                  style={{
+                                    left: `${randomX}%`,
+                                    top: `${randomY}%`,
+                                    transform: 'translate(-50%, -50%)',
+                                  }}
+                                >
+                                  ✨
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+                        </>
+                      );
+                    })()}
+                  </>
+                )}
+
+                {celebration === 'check' && (
+                  <>
+                    {/* 将军 - 简洁的闪电警告 */}
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.5 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="absolute inset-0 flex items-center justify-center pointer-events-none z-15"
+                    >
+                      <motion.div
+                        animate={{ 
+                          scale: [1, 1.2, 1, 1.2, 1],
+                          rotate: [0, -5, 5, -5, 0]
+                        }}
+                        transition={{ duration: 0.8 }}
+                        className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white text-5xl font-bold px-10 py-6 rounded-2xl shadow-2xl border-4 border-yellow-300"
+                      >
+                        ⚡ 将军！⚡
+                      </motion.div>
+                    </motion.div>
+                    
+                    {/* 闪电效果 */}
+                    <div className="absolute inset-0 pointer-events-none z-14">
+                      {[...Array(8)].map((_, i) => (
+                        <motion.div
+                          key={`lightning-${i}`}
+                          initial={{ opacity: 0, scale: 0, x: '50%', y: '50%' }}
+                          animate={{
+                            opacity: [0, 1, 0],
+                            scale: [0, 2, 0],
+                            x: `${50 + Math.cos(i * Math.PI / 4) * 40}%`,
+                            y: `${50 + Math.sin(i * Math.PI / 4) * 40}%`,
+                          }}
+                          transition={{ duration: 0.6, delay: i * 0.05 }}
+                          className="absolute text-6xl"
+                        >
+                          ⚡
+                        </motion.div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {celebration === 'checkmate' && (
+                  <>
+                    {/* 胜利 - 全屏遮罩 */}
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute inset-0 bg-gradient-to-br from-purple-900/80 via-pink-900/80 to-orange-900/80 rounded-lg z-30 pointer-events-none"
+                    />
+                    
+                    {/* 胜利文字 - 居中突出 */}
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0, y: -50 }}
+                      animate={{ 
+                        opacity: 1, 
+                        scale: 1,
+                        y: 0
+                      }}
+                      transition={{ 
+                        type: 'spring',
+                        stiffness: 200,
+                        damping: 15,
+                        delay: 0.2
+                      }}
+                      className="absolute inset-0 flex items-center justify-center pointer-events-none z-35"
+                    >
+                      <motion.div
+                        animate={{ 
+                          rotate: [0, 3, -3, 0],
+                          scale: [1, 1.05, 1]
+                        }}
+                        transition={{ repeat: Infinity, duration: 1.5 }}
+                        className="bg-gradient-to-r from-yellow-300 via-orange-400 to-pink-400 text-white text-7xl font-black px-16 py-10 rounded-3xl shadow-2xl border-8 border-yellow-200"
+                        style={{
+                          textShadow: '4px 4px 8px rgba(0,0,0,0.5)',
+                        }}
+                      >
+                        🏆 你胜利啦！🏆
+                      </motion.div>
+                    </motion.div>
+                    
+                    {/* 全屏烟花 - 从四周向中心 */}
+                    <div className="absolute inset-0 pointer-events-none overflow-hidden z-32">
+                      {[...Array(60)].map((_, i) => {
+                        const startX = i % 4 === 0 ? 0 : i % 4 === 1 ? 100 : Math.random() * 100;
+                        const startY = i % 4 === 2 ? 0 : i % 4 === 3 ? 100 : Math.random() * 100;
+                        return (
+                          <motion.div
+                            key={`firework-${i}`}
+                            initial={{ 
+                              opacity: 1, 
+                              scale: 0.5,
+                              x: `${startX}%`, 
+                              y: `${startY}%` 
+                            }}
+                            animate={{
+                              opacity: 0,
+                              scale: 2.5,
+                              x: `${50 + (Math.random() - 0.5) * 100}%`,
+                              y: `${50 + (Math.random() - 0.5) * 100}%`,
+                              rotate: Math.random() * 720
+                            }}
+                            transition={{ 
+                              duration: 2 + Math.random() * 1, 
+                              delay: i * 0.03,
+                              ease: 'easeOut'
+                            }}
+                            className="absolute text-6xl"
+                          >
+                            {['🎆', '🎇', '✨', '🌟', '💫', '⭐'][i % 6]}
+                          </motion.div>
+                        );
+                      })}
+                    </div>
+                    
+                    {/* 彩色光环脉冲 */}
+                    <div className="absolute inset-0 pointer-events-none z-31">
+                      {[...Array(8)].map((_, i) => (
+                        <motion.div
+                          key={`victory-ring-${i}`}
+                          initial={{ opacity: 0.8, scale: 0 }}
+                          animate={{
+                            opacity: 0,
+                            scale: 6 + i * 0.5,
+                          }}
+                          transition={{ 
+                            duration: 2, 
+                            delay: i * 0.2,
+                            ease: 'easeOut',
+                            repeat: Infinity,
+                            repeatDelay: 1
+                          }}
+                          className="absolute inset-0 rounded-lg border-[12px]"
+                          style={{
+                            borderColor: ['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf', '#ff8c94', '#95e1d3', '#ffd93d', '#6bcf7f'][i],
+                            boxShadow: `0 0 30px ${['#ff6b6b', '#4ecdc4', '#ffe66d', '#a8e6cf'][i % 4]}`,
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* 玩家信息 */}
+            <div className="mt-4 flex items-center justify-between bg-emerald-50 rounded-lg p-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-emerald-600 rounded-full flex items-center justify-center text-white text-xl">
+                  👦
+                </div>
+                <div>
+                  <div className="font-semibold text-gray-800">你</div>
+                  <div className="text-xs text-gray-500">
+                    {isPlayerTurn ? '轮到你了！' : '等待对手...'}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 游戏状态 */}
+            {game.game_over() && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="mt-6 text-center"
+              >
+                <div className="bg-gradient-to-r from-yellow-100 to-orange-100 rounded-lg p-4">
+                  <div className="text-2xl font-bold text-gray-800 mb-2">
+                    {game.in_checkmate() ? '🎉 你赢了！' : '游戏结束'}
+                  </div>
+                  <button
+                    onClick={resetGame}
+                    className="mt-2 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2 px-6 rounded-lg transition-colors"
+                  >
+                    再来一局
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
